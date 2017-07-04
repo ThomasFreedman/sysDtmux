@@ -1,0 +1,102 @@
+#!/bin/bash
+#
+# Use tmux to allow the client to disconnect and provide a subdivided
+#  window for each separate proces s (tmux calls them "panes").  This
+#  script is started upon reboot by systemd, or whenever witness_node
+#  dies.
+
+# Ports & Wallet Definitions
+export WRCP=0000		# witness_node's RCP port (-s ws://...)
+export CLIP=0000		# wallet's http RCP port (-H ...)
+export LOCL=127.0.0.1		# IP of loopback (i.e. localhost)
+export WALL=wallet		# cli wallet file to use
+
+# Folders
+export ACCT=			# The account to run scripts under
+export HOME=/home/$ACCT
+export NODE=$HOME/YOUR_HOME	# Where the blockchain & config.ini files are
+export BILD=$HOME/YOUR_BUILD	# Where binaries are built
+export TULZ=$HOME/YOUR_TOOLS	# This is the full path to the script to launch bts_tools monitor
+export BIN=$HOME/YOUR_BINARIES	# Where the witness and cli binaries reside
+export WIT=WITNESS_BINARY	# Name of the witness binary to execute
+
+# Commands to run in the window panes
+export CLI="cd $NODE; $BIN/cli_wallet -w $NODE/$WALL -H $LOCL:$CLIP -s ws://$LOCL:$WRCP"
+export CON="cd $BILD; workon bts_tools; clear"
+export LOG="$NODE/logs/tmuxRun.log"
+export MON="workon bts_tools; $TULZ"
+export PGR="less -i -n -j4 -J +F --follow-name $NODE/logs/witness.log" # On some op sys. these options will eat huge RAM!
+export UNL="Password to your wallet if you want to unlock it; required to publish feeds with bts_tools <= v0.4.14"
+
+echo " " >> $LOG
+echo "startTmux started at `date +\"%m-%d-%Y %r\"`" >> $LOG
+
+# Kill any previous tmux sessions hanging around
+tmux kill-session -t bts-node > /dev/null 2>&1
+
+# Start the main tmux session from which we'll create all window panes (#0 on top left)
+tmux new-session -d -s bts-node
+
+# Split screen in half horizontally (top=0, bottom=1)
+tmux split-window -v
+tmux rename-window -t bts-node:0 `cat /etc/hostname`
+
+# Split the second half in half again (top=1, bottom=2)
+tmux split-window -v
+
+# Split the top window in half vertically (left=0, right=3)
+tmux split-window -h -t 0
+
+# Wait for the witness_node to be synced and listening on ws rpc socket
+#  using lightweight functionality built into the bash shell.
+echo "Tmux window panes ready. Waiting for witness to be ready..." >> $LOG
+(echo > /dev/tcp/$LOCL/$WRCP) >/dev/null 2>&1
+while [ $? -ne 0 ]; do
+  sleep 5
+  (echo > /dev/tcp/$LOCL/$WRCP) >/dev/null 2>&1
+done
+echo "Witness is now listening. `date +\"%m-%d-%Y %r\"`" >> $LOG
+
+# Now start the cli_wallet and unlock it if the password is defined above.
+tmux send-keys -t 1 "$CLI" C-m
+if [[ "$UNL" != "" ]]; then tmux send-keys -t 1 "$UNL" C-m; fi
+echo "CLI wallet has been started." >> $LOG
+
+# Use a pager to see the witness_node output sent to log file in real time.
+tmux send-keys -t 2 "$PGR" C-m
+echo "Witness log pager has been started." >> $LOG
+
+# This window will be used for the bts_tools monitor which provides feeds
+# and a web interface through nginx. It can also build the binaries.
+tmux send-keys -t 3 "$MON" C-m
+echo "bts_tools has been started." >> $LOG
+
+# Return to the main window pane for general use and to compile code.
+tmux send-keys -t 0 "$CON" C-m
+tmux select-pane -t 0
+echo "Utility shell has been started." >> $LOG
+
+# Uncomment to view the complete set of panes. Useful for testing. Also, add
+# the following line to your .profile to see the window panes when you login.
+#tmux attach -t bts-node
+
+#exit
+
+# If the witness_node locks up,  fails or doesn't exit but stops accepting new
+# connections the failure will not be detected. The following lines will force
+# termination of all of these processes and systemd will then restart them.
+echo "Watching the witness socket... `date +\"%m-%d-%Y %r\"`" >> $LOG
+(echo > /dev/tcp/$LOCL/$WRCP) >/dev/null 2>&1
+while [ $? -eq 0 ]; do
+  sleep 5
+  (echo > /dev/tcp/$LOCL/$WRCP) >/dev/null 2>&1
+done
+
+# Try to cleanly kill any previous witness sessions hanging around
+echo "Uh Oh, witness is no longer listening! `date +\"%m-%d-%Y %r\"`" >> $LOG
+pkill -SIGINT $WIT > /dev/null 2>&1
+while [ $? -eq 0 ]; do sleep 1; pgrep $WIT > /dev/null 2>&1; done
+tmux kill-session -t bts-node > /dev/null 2>&1
+echo "Processes terminated at `date +\"%m-%d-%Y %r\"`" >> $LOG
+echo " " >> $LOG
+exit -1

@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# witnessSysD - Script to register a systemd unit  for the witness node.
+#               Feeds and bts_tools monitoring use the tmuxSysD.service,
+#               which runs separately as a systemd user service unit.
+#
+# Start the witness_node process here, using systemd to insure it starts when
+# the system is booted.  This could live with the user units, however for now
+# the separation from the user simplifies tmux session issues.
+#
+# See 'systemctl status witness.service' and 'journalctl -xn' for details.
+# Use: systemctl start witness.service to start
+
+# Config variables
+#if [[ -n $(lsb_release -a | grep -i debian) ]]; then IS_DEBIAN=1; else IS_DEBIAN=0; fi
+#export IS_DEBIAN;
+
+export USER=ACCOUNT     # Name of the account to run this service unit under
+export NODE=/home/$USER/YOUR_NODE       # Folder where blockchain & config are
+export BIN=/home/$USER/PATH_TO_BINARIES		# Full path of where the executables are found
+export SERVICE_NAME="witness_node"
+export SERVICE_EXEC="$BIN/witness_node -d $NODE --track-account \\\"1.2.277\\\" --track-account \\\"1.2.126782\\\" --replay-blockchain"
+export SERVICE_STOP="/usr/bin/pkill -SIGINT $SERVICE_NAME"
+export SERVICE_UNIT=1	# Set SERVICE_UNIT=1 to enable witness_node to start upon reboot
+
+# Create a systemd unit service definition for the witness_node to
+#  run in the background.
+if [ $SERVICE_UNIT -eq 1 ]; then
+  cat > /lib/systemd/system/$SERVICE_NAME.service <<EOL
+  [Unit]
+    Description=Job that runs the $SERVICE_NAME background process
+  [Service]
+    User=$USER
+    Type=simple
+    WorkingDirectory=$NODE
+    ExecStart=$SERVICE_EXEC
+    ExecStop=$SERVICE_STOP
+    Restart=on-failure
+  [Install]
+    WantedBy=multi-user.target
+EOL
+
+  # Enable the service so it will start automatically upon reboot.
+  # Use systemctl to stop, start, reload, status, enable, disable
+  # or manage this service. See man systemctl and man systemd.*
+  # NOTE: with Restart enabled you will need to disable this unit
+  # or it will be restarted automatically by systemd.
+  systemctl daemon-reload
+  systemctl enable $SERVICE_NAME
+fi
+

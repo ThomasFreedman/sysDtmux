@@ -1,0 +1,48 @@
+#!/bin/bash
+#
+# tmuxSysD - Script to register a systemd unit for feeds and bts_tools monitoring.
+#            This service depends on the witness_node.service unit, however formal
+#            systemd dependecies between system units  & user units is impossible.
+#            Also note the differences of this user level unit vs system level.
+#
+# See 'systemctl status tmuxer.service' and 'journalctl -xn' for details.
+# Use: systemctl start tmuxer.service to start
+
+# Config variables
+#if [[ -n $(lsb_release -a | grep -i debian) ]]; then IS_DEBIAN=1; else IS_DEBIAN=0; fi
+#export IS_DEBIAN;
+
+export USER=ACCOUNT	# Name of the login account to run this under
+export NODE=/home/$USER/YOUR_NODE	# Folder where blockchain & config are
+export SERVICE_EXEC="/home/$USER/PATH_TO_SCRIPTS"	# Where you put your scripts
+export SERVICE_NAME="tmuxer.service"	# Name of this systemd user unit to start
+export SERVICE_UNIT=1	# Set SERVICE_UNIT=1 to enable witness_node to start upon reboot
+
+# Create a systemd unit service definition for the witness_node to run in the background
+if [ $SERVICE_UNIT -eq 1 ]; then
+  cat > /home/$USER/.config/systemd/user/$SERVICE_NAME <<EOL
+  [Unit]
+    Description=Job that runs $SERVICE_NAME processes to manage this node
+  [Service]
+    #User=$USER   # These commented lines cannot be used for USER systemd unit
+    #Type=simple
+    #WorkingDirectory=$NODE
+    ExecStart=$SERVICE_EXEC
+    ExecSop=/usr/bin/tmux -kill-session $SERVICE_NAME
+    Restart=on-failure
+  [Install]
+    #WantedBy=multi-user.target
+    WantedBy=default.target
+EOL
+
+  # Enable the service so it will start automatically upon reboot.
+  # Use systemctl to stop, start, reload, status, enable, disable
+  # or manage this service. See man systemctl and man systemd.*
+  # NOTE: with Restart enabled you will need to disable this unit
+  # or it will be restarted automatically by systemd on system boot.
+# systemctl daemon-reload
+# systemctl enable $SERVICE_NAME
+ systemctl --user daemon-reload
+ systemctl --user enable $SERVICE_NAME
+fi
+
